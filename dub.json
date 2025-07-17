@@ -1,0 +1,36 @@
+{
+    "homepage": "https://github.com/AudioNiceMicroController/binding_portaudio_sndfile_for_d",
+    "name": "binding_portaudio_sndfile_for_d",
+    "description": "Bindings D pour PortAudio et libsndfile.",
+    "authors": ["uio"],
+    "license": "MIT",
+    "targetType": "library",
+    "importPaths": ["source"],
+
+    "configurations": [
+        {
+            "name": "play440hz",
+            "targetType": "executable",
+            "mainSourceFile": "examples/play440hz.d",
+            "libs": ["portaudio"],
+            "lflags": ["-L/opt/homebrew/lib"],
+            "compilerFlags": ["-I/opt/homebrew/include"]
+        },
+        {
+            "name": "openFile",
+            "targetType": "executable",
+            "mainSourceFile": "examples/openFile.d",
+            "libs": ["sndfile"],
+            "lflags": ["-L/opt/homebrew/lib"],
+            "compilerFlags": ["-I/opt/homebrew/include"]
+        },
+        {
+            "name": "readWav",
+            "targetType": "executable",
+            "mainSourceFile": "examples/readWav.d",
+            "libs": ["sndfile", "portaudio"],
+            "lflags": ["-L/opt/homebrew/lib"],
+            "compilerFlags": ["-I/opt/homebrew/include"]
+        }
+    ]
+}
