@@ -14,7 +14,7 @@
             "mainSourceFile": "examples/play440hz.d",
             "libs": ["portaudio"],
             "lflags": ["-L/opt/homebrew/lib"],
-            "compilerFlags": ["-I/opt/homebrew/include"]
+            "dflags": ["-I/opt/homebrew/include"]
         },
         {
             "name": "openFile",
@@ -22,7 +22,7 @@
             "mainSourceFile": "examples/openFile.d",
             "libs": ["sndfile"],
             "lflags": ["-L/opt/homebrew/lib"],
-            "compilerFlags": ["-I/opt/homebrew/include"]
+            "dflags": ["-I/opt/homebrew/include"]
         },
         {
             "name": "readWav",
@@ -30,7 +30,23 @@
             "mainSourceFile": "examples/readWav.d",
             "libs": ["sndfile", "portaudio"],
             "lflags": ["-L/opt/homebrew/lib"],
-            "compilerFlags": ["-I/opt/homebrew/include"]
+            "dflags": ["-I/opt/homebrew/include"]
+        },
+        {
+            "name": "realTimeFilterOnWav",
+            "targetType": "executable",
+            "mainSourceFile": "examples/realTimeFilterOnWav.d",
+            "libs": ["sndfile", "portaudio"],
+            "lflags": ["-L/opt/homebrew/lib"],
+            "dflags": ["-I/opt/homebrew/include"]
+        },
+        {
+            "name": "portaudio_minimal",
+            "targetType": "executable",
+            "mainSourceFile": "examples/portaudio_minimal.d",
+            "libs": ["portaudio"],
+            "lflags": ["-L/opt/homebrew/lib"],
+            "dflags": ["-I/opt/homebrew/include"]
         }
     ]
 }
