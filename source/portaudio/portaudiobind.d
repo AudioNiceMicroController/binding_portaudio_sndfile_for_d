@@ -5,7 +5,13 @@ module portaudio.portaudiobind;
 
 @trusted 
 extern (C) :
-
+// Ajout de la structure PaStreamInfo pour le binding
+struct PaStreamInfo {
+    int structVersion;
+    double inputLatency;
+    double outputLatency;
+    double sampleRate;
+}
 alias PaStreamCallback = PaStreamCallbackResult function(
     const(void)* input,
     // void* input,
@@ -28,6 +34,8 @@ PaError Pa_OpenDefaultStream(
     void* userData);
 
 PaError Pa_IsStreamActive(PaStream * stream);
+
+const(PaStreamInfo)* Pa_GetStreamInfo(PaStream* stream);
 
 void Pa_Sleep(long msec);
 

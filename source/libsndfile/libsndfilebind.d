@@ -6,6 +6,14 @@ extern (C):
 
 alias sf_count_t = long;
 
+
+enum SF_FORMAT_SUBMASK   = 0x0000FFFF;
+enum SF_FORMAT_PCM_16    = 0x00000002;
+enum SF_FORMAT_PCM_24    = 0x00000003;
+enum SF_FORMAT_PCM_32    = 0x00000004;
+enum SF_FORMAT_FLOAT     = 0x00000006;
+enum SF_FORMAT_DOUBLE    = 0x00000007;
+
 struct SF_INFO {
     sf_count_t frames;
     int samplerate;

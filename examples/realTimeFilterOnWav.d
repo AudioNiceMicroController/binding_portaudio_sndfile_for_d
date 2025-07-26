@@ -3,97 +3,79 @@ import portaudio.portaudiobind;
 import std.string : fromStringz, toStringz;
 import std.stdio;
 import std.format;
+import core.stdc.stdlib : exit;  // Ajoutez cette ligne
+
+int ii=0;
+
+// Constante pour la taille du buffer
+enum BUFFER_SIZE = 512;
 
 struct Data{
     SNDFILE* snd;
     SF_INFO info;
-}
-double filterFunction(double dataRaw) {
-    enum int filterOrder = 4;
-    double y = 0;
-
-    // Taille fixe des tableaux
-    enum int arraySize = filterOrder+1;
-    double[arraySize] a;
-    double[arraySize] b;
-
-    // Variables statiques (mémorisent les valeurs d'appel en appel)
-    static double[arraySize] yIntermediate = [0.0, 0.0, 0.0, 0.0];
-    static double[arraySize] xIntermediate = [0.0, 0.0, 0.0, 0.0];
-
-    // Coefficients du filtre
-a[0]  = 3.8302186497047874e-01;
-a[1]  =-1.4620987554218603e+00;   b[1]  = 2.0206902783207523e+00;
-a[2]  = 2.1597895341517730e+00;   b[2]  =-1.8599927841593680e+00;
-a[3]  =-1.4620987554218603e+00;   b[3]  = 8.2253745479395324e-01;
-a[4]  = 3.8302186497047869e-01;   b[4]  =-1.4681025766237743e-01;
-
-    // Décalage des buffers
-    for (int m = filterOrder; m > 0; --m) {
-        yIntermediate[m] = yIntermediate[m - 1];
-        xIntermediate[m] = xIntermediate[m - 1];
-    }
-
-    // Stocker la nouvelle donnée
-    xIntermediate[0] = dataRaw;
-
-    // Calcul du filtre
-    for (int m = 0; m <= filterOrder; ++m) {
-        y += a[m] * xIntermediate[m];
-        if (m > 0) {
-            y += b[m] * yIntermediate[m];
-        }
-    }
-
-    // Mise à jour des intermédiaires
-    yIntermediate[0] = y;
-
-    return y;
+    FilterState* filter; // Ajoute ce champ
+    double[BUFFER_SIZE*2]bufferStereo; // Buffer pour les canaux stéréo
 }
 
 
-double applyFIR(double input) {
-    // Coefficients du filtre (supposés constants)
-    immutable double[] firCoeffs = [
-        0.00041582027766520177, 0.00030434498470724577, 0.00017647185247592526,
-        -1.1580594464363166e-05, -0.00030941792654728826, -0.0007695820906489929,
-        -0.001444278610158534, -0.002381902653727287, -0.0036235665108961916,
-        -0.005199837751778276, -0.007127891573214548, -0.009409262640575433,
-        -0.012028351982778724, -0.014951804770509293, -0.018128827320351096,
-        -0.021492459142100854, -0.024961761348070467, -0.02844482949605697,
-        -0.03184249012927787, -0.03505249886205053, -0.03797402637934466,
-        -0.04051219913825119, -0.04258245514905321, -0.04411448246292725,
-        -0.04505552857866089, 0.9550995824803418, -0.04505552857866088,
-        -0.04411448246292724, -0.04258245514905321, -0.04051219913825118,
-        -0.037974026379344654, -0.03505249886205052, -0.03184249012927787,
-        -0.028444829496056957, -0.024961761348070457, -0.02149245914210085,
-        -0.018128827320351093, -0.014951804770509287, -0.01202835198277872,
-        -0.009409262640575424, -0.007127891573214548, -0.005199837751778276,
-        -0.0036235665108961894, -0.0023819026537272845, -0.001444278610158532,
-        -0.0007695820906489919, -0.00030941792654728826, -1.1580594464363161e-05,
-        0.00017647185247592515, 0.00030434498470724555, 0.00041582027766520177
-    ];
+//--------------------------------------------------------
+// Filtre IIR Direct Form 1
+struct CanalRealTimeProcessing{
+    double[] x;  // mémoire des entrées passées
+    double[] y;  // mémoire des sorties passées
+}
+struct FilterState {
+    double[] a;  // coefficients feedback (dénominateur), a[0] = 1.0
+    double[] b;  // coefficients feedforward (numérateur)
+    CanalRealTimeProcessing gauche; // Canal gauche
+    CanalRealTimeProcessing droit;   // Canal droit
+    size_t ordre; // ordre du filtre
 
-    // Static buffer circulaire pour les derniers échantillons
-    enum int N = firCoeffs.length;
-    static double[N] buffer = 0;
-    static int index = 0;
-
-    buffer[index] = input;
-
-    double result = 0;
-    int bufIndex = index;
-
-    // Calcul du filtre
-    foreach (i, coeff; firCoeffs) {
-        result += coeff * buffer[bufIndex];
-        bufIndex = (bufIndex - 1 + N) % N;  // buffer circulaire
+    this(double[] bCoeffs, double[] aCoeffs) {
+        b = bCoeffs.dup;
+        a = aCoeffs.dup;
+        if (a.length > 0 && a[0] != 1.0)
+            throw new Exception("Le premier coefficient de a doit être 1.0");
+        assert(b.length > 0, "Le filtre doit avoir au moins un coefficient b");
+        assert(a.length > 0, "Le filtre doit avoir au moins un coefficient a");
+        assert(b.length == a.length, "Les coefficients b et a doivent avoir la même longueur");
+        ordre = a.length - 1;
+        gauche = CanalRealTimeProcessing();// réinitialisation des canaux
+        droit = CanalRealTimeProcessing();
+        gauche.x = new double[a.length];
+        gauche.y = new double[a.length];
+        droit.x = new double[a.length];
+        droit.y = new double[a.length];
+        gauche.x[]=0; // Initialisation des entrées passées à zéro
+        gauche.y[]=0; // Initialisation des sorties passées à zéro
+        droit.x[]=0; // Initialisation des entrées passées à zéro
+        droit.y[]=0; // Initialisation des sorties passées à zéro
     }
+}
+// Filtre global
+FilterState globalFilter;
 
-    // Avancer l'index du buffer circulaire
-    index = (index + 1) % N;
 
-    return result;
+float iirRealTimeProcessing(float input, FilterState *fs, CanalRealTimeProcessing *c) {
+    auto N = fs.b.length - 1;
+    for (auto n = N; n >= 1; n--) {
+        c.x[n] = c.x[n - 1];
+    }
+    c.x[0] = input; // Initialisation de l'entrée actuelle
+    double y0 = 0.0; // Initialisation de la sortie actuelle
+    for (auto n = 0; n <= N; n++) {
+        y0 += fs.b[n] * c.x[n];
+    }
+    for (auto n = 1; n <= N; n++) {
+        y0 -= fs.a[n] * c.y[n];
+    }
+    // décaler les sorties
+    for (auto n = N; n >= 1; n--) {
+        c.y[n] = c.y[n - 1];
+    }
+    
+    c.y[0] = y0; // Stockage de la sortie actuelle
+    return cast(float)y0; // Retourne la sortie actuelle
 }
 
 extern(C) @trusted
@@ -105,14 +87,24 @@ PaStreamCallbackResult audioCallback(
                             PaStreamCallbackFlags statusFlags,
                             void* userData) {
     auto data = cast(Data*)userData;
-    auto out_ = cast(short*)output;
 
     // Nombre total d'échantillons à lire : frames × canaux
     size_t totalSamples = frameCount * data.info.channels;
-
+    
     // Lire les échantillons audio
-    sf_count_t samplesRead = sf_read_short(data.snd, out_, totalSamples);
+    auto out_ = cast(float*)output;
+    // cast en slice D : // Pas de copie // Pas d’allocation // Opération O(1)
+    float[] outSlice = out_[0 .. totalSamples];
 
+    sf_count_t samplesRead = sf_read_float(data.snd, out_, totalSamples);
+    
+    // Appliquer le filtre seulement si on a lu des échantillons
+    if (samplesRead > 0) {
+        for (size_t i = 0; i < samplesRead; i+=2) {
+            outSlice[i] = iirRealTimeProcessing(outSlice[i], data.filter, &data.filter.gauche);
+            outSlice[i+1] = iirRealTimeProcessing(outSlice[i+1], data.filter, &data.filter.droit);
+        }   
+    }   
     if (samplesRead < totalSamples) {
         // Fin du fichier
         // Zéro-padding pour finir proprement
@@ -121,105 +113,160 @@ PaStreamCallbackResult audioCallback(
         }
         return PaStreamCallbackResult.paComplete;
     }
-    double d, e;
-    for (size_t i = 0; i < totalSamples; ++i){
-        d = cast(double) out_[i];        // Convertir l'entrée en double
-        e = applyFIR(d);           //applyFIR filterFunction Filtrage en double
-        out_[i] = cast(short) e;         // Cast du résultat en short
-    }
 
     return PaStreamCallbackResult.paContinue;
 }
 
+Data data;
+PaStream* stream = null;
 
 void main() {
 
-    ///////////////////////////////////////////// déclaration des variables
-    Data data;
-    PaStream* stream = null; // ✅ déclarée avant tout goto
     PaError err;
     PaDeviceInfo *deviceInfo;
-    string nf= "/Users/uio/Music/small.wav";
+    string nf= "/Users/uio/Music/_.wav";
     int defaultDevice;
     uint format, pcm;
-
-    ///////////////////////////////////////////// ouverture du wav en lecture
-    data.snd = sf_open(nf.toStringz(), SFM_READ, &data.info);
-    // const(char)* nf = "/Users/uio/Music/_.wav";
-    // data.snd = sf_open(nf, SFM_READ, &data.info);
-    if (data.snd == null) {
-        writeln("Erreur d'ouverture du fichier WAV : ", fromStringz(sf_strerror(null)));
-        goto fin1;
-    }
-
-    ///////////////////////////////////////////// lire les infos du wav
-    format = data.info.format & SF_FORMAT.TYPEMASK;
-    pcm = data.info.format & SF_FORMAT.SUBMASK;
-    if (format == SF_FORMAT.WAV){
-        writeln(" - Format : Wav");
-    }    
-    if (pcm == SF_FORMAT.PCM_16){
-        writeln(" - PCM 16-bit");
-    }
-    writeln(" - Sample rate : ", data.info.samplerate); // 44100, 48000...
-    writeln(" - # canal : ", data.info.channels); // 1 (mono), 2 (stéréo)...
+    const(PaStreamInfo)* streamInfo;
 
 
-    ///////////////////////////////////////////// initialisation de portaudio
-    err = Pa_Initialize();
-    if (err != PaError.paNoError) { 
-        writeln("Erreur : ", fromStringz(sf_strerror(null)));
-        goto fin1;
-    }
+    // Initialiser le filtre
+double[] b = [0.066605780250, 0.066605780250];
+double[] a = [1.000000000000, -0.866788439500]; 
+    globalFilter = FilterState(b, a);
+    writefln("globalFilter.a[0] = %f", globalFilter.a[0]);
+    data.filter = &globalFilter; // Associer le filtre à la structure Data
+    data.snd =ouvreSF(nf.toStringz(), &data.info);
 
-    ///////////////////////////////////////////// TEST des périph
-    defaultDevice = Pa_GetDefaultOutputDevice();
-    writeln("Pa_GetDefaultOutputDevice : ",defaultDevice);
-    if (defaultDevice == PaError.paNoDevice) {
-        writeln("Aucun périphérique de sortie audio par défaut n'est disponible.");
-        goto fin1;
-    }
-    
-    deviceInfo = Pa_GetDeviceInfo(defaultDevice);
-    writeln("Périphérique par défaut : ", fromStringz((*deviceInfo).name));
 
-    ///////////////////////////////////////////// ouverture du stream
-    err = Pa_OpenDefaultStream(
-        &stream,
-        0, // pas d'entrée
-        data.info.channels,
-        paInt16,
-        data.info.samplerate,
-        512, // frames par buffer
-        &audioCallback,
-        &data
-    );
+    lireInfosDuWav(&data.info);
 
-    if (err != PaError.paNoError) {
-        writeln("Erreur d'ouverture du flux audio : ", fromStringz(Pa_GetErrorText(err)));
-        sf_close(data.snd);
-        Pa_Terminate();
-        goto fin2;
-    }
-    ///////////////////////////////////////////// start stream
-    Pa_StartStream(stream);
+    initPortaudio();
+
+    ouvreLeStreamParDefaut();
+
+    ditLesInfosDuStream(stream);
+    commenceLeStream(stream);
+
     writeln("Lecture en cours...");
-
-    // Boucle d'attente pendant la lecture
     while (Pa_IsStreamActive(stream) == 1) {
         Pa_Sleep(100);
     }
     writeln("Lecture terminée.");
 
-fin4:
-    if (stream !is null)
-        Pa_StopStream(stream);
-fin3:
-    if (stream !is null)
+    fermerTout(stream, data.snd);
+}
+/*
+
+dub run --config=realTimeFilterOnWav
+
+*/
+
+void initPortaudio() {
+    PaError err = Pa_Initialize();
+    if (err != PaError.paNoError) {
+        writeln("Erreur d'initialisation de PortAudio : ", fromStringz(Pa_GetErrorText(err)));
+        exit(1);
+    }
+}
+
+void ditLesInfosDuStream(PaStream* stream) {
+    const(PaStreamInfo)* info = Pa_GetStreamInfo(stream);
+    if (info !is null) {
+        writeln("\nPa : Informations du flux :");
+        writeln("Version de la structure : ", info.structVersion);
+        writeln("Latence d'entrée : ", info.inputLatency);
+        writeln("Latence de sortie : ", info.outputLatency);
+        writeln("Taux d'échantillonnage : ", info.sampleRate);
+    } else {
+        writeln("Aucune information disponible pour le flux.");
+    }
+}
+void commenceLeStream(PaStream* stream) {
+    PaError err = Pa_StartStream(stream);
+    if (err != PaError.paNoError) {
+        writeln("Erreur de démarrage du flux : ", fromStringz(Pa_GetErrorText(err)));
+        exit(1);
+    }
+}
+void stopLeStream(PaStream* stream) {
+    PaError err = Pa_StopStream(stream);
+    if (err != PaError.paNoError) {
+        writeln("Erreur d'arrêt du flux : ", fromStringz(Pa_GetErrorText(err)));
+        exit(1);
+    }
+}
+
+void fermerTout(PaStream* stream, SNDFILE* snd) {
+    stopLeStream(stream);
+    if (stream !is null) {
         Pa_CloseStream(stream);
-fin2:
+    }
+    if (snd !is null) {
+        sf_close(snd);
+    }
     Pa_Terminate();
-fin1:
-    if (data.snd !is null)
+}
+void lireInfosDuWav(SF_INFO* info) {
+    writeln("\nSND : Informations du fichier WAV :");
+    int pcm = info.format & SF_FORMAT_SUBMASK;
+    if (pcm == SF_FORMAT_PCM_16) {
+        writeln("Format PCM 16 bits");
+    } else if (pcm == SF_FORMAT_PCM_24) {
+        writeln("Format PCM 24 bits");
+    } else if (pcm == SF_FORMAT_PCM_32) {
+        writeln("Format PCM 32 bits");
+    } else if (pcm == SF_FORMAT_FLOAT) {
+        writeln("Format Float");
+    } else if (pcm == SF_FORMAT_DOUBLE) {
+        writeln("Format Double");
+    } else {
+        writeln("Format inconnu : ", pcm);
+    }
+    if (info.channels == 1) {
+        writeln("Mono");
+    } else if (info.channels == 2) {
+        writeln("Stéréo");
+    } else {
+        writeln("Nombre de canaux : ", info.channels);
+    }
+    if (info.samplerate == 0) {
+        writeln("Taux d'échantillonnage inconnu");
+    } else {
+        writeln("Taux d'échantillonnage : ", info.samplerate);
+    }
+    if (info.frames == 0) {
+        writeln("Nombre d'échantillons inconnu");
+    } else {
+        writeln("Nombre d'échantillons : ", info.frames);
+    }
+    if (info.format == 0) {
+        writeln("Format inconnu");
+    }
+}
+SNDFILE *ouvreSF(const(char)* filename, SF_INFO* info) {
+    SNDFILE *snd = sf_open(filename, SFM_READ, info);
+    if (snd is null) {
+        writeln("ouvreSF: Erreur d'ouverture du fichier WAV : ", fromStringz(sf_strerror(null)));
+    }
+    return snd;
+}
+
+void ouvreLeStreamParDefaut() {
+    PaError err = Pa_OpenDefaultStream(
+        &stream,
+        0, // pas d'entrée
+        data.info.channels,
+        paFloat32, // format float
+        data.info.samplerate,
+        BUFFER_SIZE, // frames par buffer
+        &audioCallback,
+        &data
+    );
+    if (err != PaError.paNoError) {
+        writeln("Erreur d'ouverture du flux audio : ", fromStringz(Pa_GetErrorText(err)));
         sf_close(data.snd);
+        Pa_Terminate();
+        exit(1);
+    }
 }

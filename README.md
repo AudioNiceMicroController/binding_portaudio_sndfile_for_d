@@ -45,3 +45,8 @@ dub run --config=play440hz
 ```bash
 dub run --config=openFile
 ```
+
+```bash
+dub run --config=realTimeFilterOnWav
+dub run --config=realTimeFilterOnWav --build=debug --verbose
+```
